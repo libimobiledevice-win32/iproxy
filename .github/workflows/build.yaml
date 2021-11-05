@@ -1,0 +1,170 @@
+name: build
+on: [push]
+env:
+  LIBPLIST_VERSION: 2.2.0
+  # Use this version of libusbmuxd, as it contains a fix for the socket code on Windows.
+  LIBUSBMUXD_VERSION: c56e112ee48909b4bad90fcbb95352c5914bd30f
+
+jobs:
+  build-macOS:
+    runs-on: macOS-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [
+          { arch: x86_64, rid: osx-x64 }
+        ]
+    steps:
+    - name: install dependencies
+      run: |
+          brew install libtool autoconf automake
+      shell: bash
+
+    - name: Download libplist
+      run: |
+          wget https://github.com/libimobiledevice/libplist/archive/refs/tags/${LIBPLIST_VERSION}.tar.gz -O libplist-${LIBPLIST_VERSION}.tar.gz
+          tar xvzf libplist-${LIBPLIST_VERSION}.tar.gz
+      working-directory: ${{ github.workspace }}
+    - name: Build libplist
+      run: |
+          SDKDIR=`xcrun --sdk macosx --show-sdk-path`
+          export CFLAGS="-arch ${{ matrix.arch }} -isysroot $SDKDIR"
+          ./autogen.sh --without-cython --enable-shared=yes --enable-static=no
+          make
+          sudo make install
+          mkdir -p $(pwd)/../artifact/${{ matrix.rid }}
+          DESTDIR=$(pwd)/../artifact/${{ matrix.rid }} make install
+      working-directory: ${{ github.workspace }}/libplist-${{ env.LIBPLIST_VERSION }}
+
+    - name: Download libusbmuxd
+      run: |
+          wget https://github.com/libimobiledevice/libusbmuxd/archive/${LIBUSBMUXD_VERSION}.tar.gz -O libusbmuxd-${LIBUSBMUXD_VERSION}.tar.gz
+          tar xvzf libusbmuxd-${LIBUSBMUXD_VERSION}.tar.gz
+      working-directory: ${{ github.workspace }}
+    - name: Build libusbmuxd
+      run: |
+          SDKDIR=`xcrun --sdk macosx --show-sdk-path`
+          export CFLAGS="-arch ${{ matrix.arch }} -isysroot $SDKDIR"
+          ./autogen.sh --without-cython --enable-shared=yes --enable-static=no
+          make
+          sudo make install
+          DESTDIR=$(pwd)/../artifact/${{ matrix.rid }} make install
+      working-directory: ${{ github.workspace }}/libusbmuxd-${{ env.LIBUSBMUXD_VERSION }}
+
+    - name: Publish artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: iproxy
+        path: ${{ github.workspace }}/artifact
+
+  build-linux:
+    runs-on: ubuntu-18.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [
+          { rid: linux-x64 }
+        ]
+    steps:
+    - name: install dependencies
+      run: |
+          sudo apt-get install -y libtool autoconf automake
+      shell: bash
+
+    - name: Download libplist
+      run: |
+          wget https://github.com/libimobiledevice/libplist/archive/refs/tags/${LIBPLIST_VERSION}.tar.gz -O libplist-${LIBPLIST_VERSION}.tar.gz
+          tar xvzf libplist-${LIBPLIST_VERSION}.tar.gz
+      working-directory: ${{ github.workspace }}
+    - name: Build libplist
+      run: |
+          ./autogen.sh --without-cython --enable-shared=yes --enable-static=no
+          make
+          sudo make install
+          mkdir -p $(pwd)/../artifact/${{ matrix.rid }}
+          DESTDIR=$(pwd)/../artifact/${{ matrix.rid }} make install
+      working-directory: ${{ github.workspace }}/libplist-${{ env.LIBPLIST_VERSION }}
+
+    - name: Download libusbmuxd
+      run: |
+          wget https://github.com/libimobiledevice/libusbmuxd/archive/${LIBUSBMUXD_VERSION}.tar.gz -O libusbmuxd-${LIBUSBMUXD_VERSION}.tar.gz
+          tar xvzf libusbmuxd-${LIBUSBMUXD_VERSION}.tar.gz
+      working-directory: ${{ github.workspace }}
+    - name: Build libusbmuxd
+      run: |
+          ./autogen.sh --without-cython --enable-shared=yes --enable-static=no
+          make
+          sudo make install
+          DESTDIR=$(pwd)/../artifact/${{ matrix.rid }} make install
+      working-directory: ${{ github.workspace }}/libusbmuxd-${{ env.LIBUSBMUXD_VERSION }}
+
+    - name: Publish artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: iproxy
+        path: ${{ github.workspace }}/artifact
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [
+          { msystem: MINGW64, arch: x86_64, rid: win7-x64 },
+          { msystem: MINGW32, arch: i686,   rid: win7-x86 }
+        ]
+    steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{ matrix.msystem }}
+        release: false
+        update: false
+        install: >-
+          base-devel
+          git
+          mingw-w64-${{ matrix.arch }}-gcc
+          make
+          libtool
+          autoconf
+          automake-wrapper
+    - name: prepare environment
+      run: |
+          dest=`echo ${{ matrix.msystem }} |tr [:upper:] [:lower:]`
+          echo "dest=$dest" >> $GITHUB_ENV
+          echo "target_triplet=`gcc -dumpmachine`" >> $GITHUB_ENV
+
+    - name: Download libplist
+      run: |
+          wget https://github.com/libimobiledevice/libplist/archive/refs/tags/${LIBPLIST_VERSION}.tar.gz -O libplist-${LIBPLIST_VERSION}.tar.gz
+          tar xvzf libplist-${LIBPLIST_VERSION}.tar.gz
+      working-directory: ${{ github.workspace }}
+    - name: Build libplist
+      run: |
+          ./autogen.sh CC=gcc CXX=g++ --enable-shared=yes --enable-static=no
+          make
+          make install
+          mkdir -p $(pwd)/../artifact/${{ matrix.rid }}
+          DESTDIR=$(pwd)/../artifact/${{ matrix.rid }} make install
+      working-directory: ${{ github.workspace }}/libplist-${{ env.LIBPLIST_VERSION }}
+
+    - name: Download libusbmuxd
+      run: |
+          wget https://github.com/libimobiledevice/libusbmuxd/archive/${LIBUSBMUXD_VERSION}.tar.gz -O libusbmuxd-${LIBUSBMUXD_VERSION}.tar.gz
+          tar xvzf libusbmuxd-${LIBUSBMUXD_VERSION}.tar.gz
+      working-directory: ${{ github.workspace }}
+    - name: Build libusbmuxd
+      run: |
+          ./autogen.sh CC=gcc CXX=g++ --enable-shared=yes --enable-static=no
+          make
+          make install
+          DESTDIR=$(pwd)/../artifact/${{ matrix.rid }} make install
+      working-directory: ${{ github.workspace }}/libusbmuxd-${{ env.LIBUSBMUXD_VERSION }}
+
+    - name: Publish artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: iproxy
+        path: ${{ github.workspace }}/artifact
